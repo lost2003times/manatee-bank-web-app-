@@ -2,42 +2,52 @@
 
 include "database.php";
 
-$error_message = "";
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 $_SESSION['error'] = "";
-if (!array_key_exists("logged_in", $_SESSION)) {
-	$_SESSION['logged_in'] = false;
+
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+
+    $username = trim($_POST['username']);
+    $password = $_POST['password'];
+
+    if (empty($username) || empty($password)) {
+        $_SESSION['error'] = "All fields are required";
+        exit();
+    }
+
+    // Get user
+    $stmt = $mysqli->prepare("SELECT * FROM users WHERE username = ?");
+    $stmt->bind_param("s", $username);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows === 1) {
+
+        $user = $result->fetch_assoc();
+
+        // 🔐 Recreate hash
+        $hashed_input = hash('sha256', $password . $user['salt']);
+
+        if ($hashed_input === $user['password']) {
+
+            $_SESSION['logged_in'] = true;
+            $_SESSION['user'] = $username;
+            $_SESSION['userid'] = $user['userid'];
+
+            session_regenerate_id(true);
+
+            header("Location: account.php");
+            exit();
+
+        } else {
+            $_SESSION['error'] = "Invalid username or password";
+        }
+
+    } else {
+        $_SESSION['error'] = "Invalid username or password";
+    }
 }
-
-if (array_key_exists('username', $_POST) && array_key_exists('password', $_POST)) {
-
-	$username = $_POST['username'];
-	$password = md5($_POST['password']);
-
-	// Stop SQL injection
-	$username = str_replace("'", "\'", $username);
-	$username = str_replace('"', '\"', $username);
-
-	$query = "SELECT * FROM users WHERE username='" . $username . "' AND password='" . $password . "'";
-
-	$result = $mysqli->query($query);
-
-	if (!$result) {
-		 echo "Failed to query: (" . $mysqli->errno . ") " . $mysqli->error;
-	}
-    
-
-	if ($result->num_rows > 0) {
-		$_SESSION['logged_in'] = true;
-		$_SESSION['user'] = $username;
-		$_SESSION['userid'] = $result->fetch_array(MYSQLI_ASSOC)['userid'];
-	} else {
-		$_SESSION['error'] =  "Invalid password. <br>QuikBankSite default username/password is admin/password";
-	}
-
-} elseif ($_SESSION['logged_in'] === false) {
-	$_SESSION['error'] = "You must login";
-}
-
-
 ?>

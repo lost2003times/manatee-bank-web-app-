@@ -1,87 +1,90 @@
 <?php
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+
 include 'config.php';
-include "includes/database.php";
+include 'includes/database.php';
 
 $ERROR = "";
 $OKAY = FALSE;
 
-if (array_key_exists('username', $_POST) && array_key_exists('password', $_POST) && array_key_exists('fullname', $_POST))  {
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
-    $username = $_POST['username'];
-    $fullname = $_POST['fullname'];
-	$password = md5($_POST['password']);
+    $username = trim($_POST['username']);
+    $fullname = trim($_POST['fullname']);
+    $password = $_POST['password'];
 
-	// Stop SQL injection
-    // Was having some problems, disabled for now
-	// $username = str_replace("'", "\'", $username);
-	// $username = str_replace('"', '\"', $username);
+    if (empty($username) || empty($password) || empty($fullname)) {
+        $ERROR = "All fields are required";
+    } else {
 
-	$query = "SELECT * FROM users WHERE username='" . $username . "'";
+        // Generate salt
+        $salt = bin2hex(random_bytes(16));
 
-	$result = $mysqli->query($query);
+        // Hash password
+        $hashed_password = hash('sha256', $password . $salt);
 
-	if (!$result) {
-		$ERROR = "Failed to query: (" . $mysqli->errno . ") " . $mysqli->error;
-	} else {
+        // Check if exists
+        $stmt = $mysqli->prepare("SELECT * FROM users WHERE username = ?");
+        $stmt->bind_param("s", $username);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
         if ($result->num_rows > 0) {
-            $ERROR = "The username you selected is already being used, please try another.";
+            $ERROR = "Username already exists";
         } else {
-            $query = "INSERT INTO users (username, fullname, password) VALUES ('" . $username . "', '" . $fullname . "', '" . $password . "')";
-            $result = $mysqli->query($query);
 
-            if ($result === TRUE) {
+            // Insert user
+            $stmt = $mysqli->prepare("INSERT INTO users (username, fullname, password, salt) VALUES (?, ?, ?, ?)");
+            $stmt->bind_param("ssss", $username, $fullname, $hashed_password, $salt);
+
+            if ($stmt->execute()) {
                 $OKAY = TRUE;
             } else {
                 $ERROR = "Insert failed";
             }
         }
     }
-
-    if (!$mysqli->connect_errno) {
-        $mysqli->close();
-    }
-
 }
-
 ?>
-<?php include 'includes/header.php' ?>
+
+<?php include 'includes/header.php'; ?>
 
 <main class="container">
 
-    <p>
-    Signing up for an account is fast and easy!
-    </p>
+<p>Signing up for an account is fast and easy!</p>
 
+<?php if ($ERROR != ""): ?>
+<div class="alert alert-danger">
+<?php echo $ERROR; ?>
+</div>
+<?php endif; ?>
 
-    <?php if ($ERROR != "") : ?>
-    <div class="alert alert-danger">
-        <?php echo($ERROR); ?>
+<?php if ($OKAY): ?>
+<div class="alert alert-success">
+Account created successfully!
+</div>
+<?php endif; ?>
+
+<form method="post" action="signup.php">
+    <div class="form-group">
+        <label>Username</label>
+        <input type="text" class="form-control" name="username">
     </div>
-    <?php endif; ?>
 
-    <?php if ($OKAY) : ?>
-    <div class="alert alert-success">
-        Account created! Welcome to <?php echo($CONFIG['company_name']); ?>
+    <div class="form-group">
+        <label>Full Name</label>
+        <input type="text" class="form-control" name="fullname">
     </div>
-    <?php endif; ?>
 
-    <form method="post" action="signup.php">
-        <div class="form-group">
-            <label for="username">Username</label>
-            <input type="text" class="form-control" name="username" id="username" placeholder="Username">
-        </div>
-    
-        <div class="form-group">
-            <label for="fullname">Full Name</label>
-            <input type="text" class="form-control" name="fullname" id="fullname" placeholder="Full Name">
-        </div>
-        <div class="form-group">
-            <label for="username">Password</label>
-            <input type="password" class="form-control" name="password" id="password">
-        </div>
-        <button type="submit" class="btn btn-primary">Sign Up!</button>
-    </form>
+    <div class="form-group">
+        <label>Password</label>
+        <input type="password" class="form-control" name="password">
+    </div>
+
+    <button type="submit" class="btn btn-primary">Sign Up</button>
+</form>
 
 </main>
 
-<?php include 'includes/footer.php' ?>
+<?php include 'includes/footer.php'; ?>

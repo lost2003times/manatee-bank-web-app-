@@ -1,8 +1,10 @@
+
 <?php
 
-$mysqli = new mysqli("localhost", $CONFIG['database_user'], $CONFIG['database_password'], $CONFIG['database']);
+$mysqli = new mysqli("127.0.0.1", $CONFIG['database_user'], $CONFIG['database_password'], $CONFIG['database']);
 
 if ($mysqli->connect_errno) {
-    echo "Failed to connect to MySQL: (" . $mysqli->connect_errno . ") " . $mysqli->connect_error;
+    die("Database connection failed: " . $mysqli->connect_error);
 }
+
 ?>
