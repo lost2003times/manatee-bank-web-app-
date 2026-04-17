@@ -17,7 +17,12 @@ if (!array_key_exists('action', $_GET) && !array_key_exists('action', $_POST)) {
 
 // ====================== ADD ACCOUNT ======================
 if ($action == "add_account") {
-
+    
+     if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+        echo "Access denied: Admin only";
+        return;
+    }
+	
     $name = trim($_POST['name']);
 
     if (empty($name)) {

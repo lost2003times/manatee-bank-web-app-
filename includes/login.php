@@ -2,33 +2,34 @@
 
 include "database.php";
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+$error_message = "";
+
+if (!array_key_exists("logged_in", $_SESSION)) {
+    $_SESSION['logged_in'] = false;
 }
 
-$_SESSION['error'] = "";
-
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
+// ✅ Only run when login form is submitted
+if (isset($_POST['username']) && isset($_POST['password'])) {
 
     $username = trim($_POST['username']);
     $password = $_POST['password'];
 
     if (empty($username) || empty($password)) {
-        $_SESSION['error'] = "All fields are required";
-        exit();
+        $_SESSION['error'] = "Username and password required";
+        return;
     }
 
-    // Get user
+    // 🔐 Get user securely
     $stmt = $mysqli->prepare("SELECT * FROM users WHERE username = ?");
     $stmt->bind_param("s", $username);
     $stmt->execute();
     $result = $stmt->get_result();
 
-    if ($result->num_rows === 1) {
+    if ($result && $result->num_rows === 1) {
 
         $user = $result->fetch_assoc();
 
-        // 🔐 Recreate hash
+        // 🔐 Hash input with stored salt
         $hashed_input = hash('sha256', $password . $user['salt']);
 
         if ($hashed_input === $user['password']) {
@@ -36,18 +37,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $_SESSION['logged_in'] = true;
             $_SESSION['user'] = $username;
             $_SESSION['userid'] = $user['userid'];
+            $_SESSION['role'] = $user['role']; // ✅ ROLE ADDED
 
             session_regenerate_id(true);
 
             header("Location: account.php");
             exit();
-
-        } else {
-            $_SESSION['error'] = "Invalid username or password";
         }
-
-    } else {
-        $_SESSION['error'] = "Invalid username or password";
     }
+
+    $_SESSION['error'] = "Invalid username or password";
 }
 ?>
