@@ -7,30 +7,38 @@
 
 <?php
 
-if (!array_key_exists('action', $_GET) && !array_key_exists('action', $_POST)) {
+if (!isset($_GET['action']) && !isset($_POST['action'])) {
     $action = 'view';
-} elseif (array_key_exists('action', $_POST)) {
+} elseif (isset($_POST['action'])) {
     $action = $_POST['action'];
 } else {
     $action = $_GET['action'];
 }
 
-// ====================== ADD ACCOUNT ======================
+/* ====================== ADD ACCOUNT ====================== */
 if ($action == "add_account") {
-    
-     if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
-        echo "Access denied: Admin only";
-        return;
-    }
-	
+    if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+    echo "Access denied: Admin only";
+    $action = "view";
+    return;
+}	
+
     $name = trim($_POST['name']);
 
     if (empty($name)) {
         echo "Account name required";
     } else {
 
+        // Determine target user
+        if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin' && isset($_POST['userid'])) {
+            $target_user = (int)$_POST['userid'];
+        } else {
+            $target_user = (int)$_SESSION['userid'];
+        }
+
+        // Check duplicate
         $stmt = $mysqli->prepare("SELECT * FROM accounts WHERE userid = ? AND accountname = ?");
-        $stmt->bind_param("is", $_SESSION['userid'], $name);
+        $stmt->bind_param("is", $target_user, $name);
         $stmt->execute();
         $result = $stmt->get_result();
 
@@ -39,7 +47,7 @@ if ($action == "add_account") {
         } else {
 
             $stmt = $mysqli->prepare("INSERT INTO accounts (accountname, userid, balance) VALUES (?, ?, 0)");
-            $stmt->bind_param("si", $name, $_SESSION['userid']);
+            $stmt->bind_param("si", $name, $target_user);
             $success = $stmt->execute();
 
             if (!$success) {
@@ -51,11 +59,10 @@ if ($action == "add_account") {
     $action = "view";
 }
 
-// ====================== UPLOAD CHECK ====================
+/* ====================== UPLOAD CHECK ====================== */
 else if ($action == "upload") {
 
-    // Validate inputs
-    $accountid = isset($_POST['accountid']) ? $_POST['accountid'] : null;
+    $accountid = $_POST['accountid'] ?? null;
     $name = trim($_POST['name']);
 
     if (empty($accountid)) {
@@ -68,9 +75,15 @@ else if ($action == "upload") {
         exit();
     }
 
-    // Verify account belongs to user (authorization check)
-    $stmt = $mysqli->prepare("SELECT * FROM accounts WHERE accountid = ? AND userid = ?");
-    $stmt->bind_param("ii", $accountid, $_SESSION['userid']);
+    // Authorization check
+    if ($_SESSION['role'] === 'admin') {
+        $stmt = $mysqli->prepare("SELECT * FROM accounts WHERE accountid = ?");
+        $stmt->bind_param("i", $accountid);
+    } else {
+        $stmt = $mysqli->prepare("SELECT * FROM accounts WHERE accountid = ? AND userid = ?");
+        $stmt->bind_param("ii", $accountid, $_SESSION['userid']);
+    }
+
     $stmt->execute();
     $res = $stmt->get_result();
 
@@ -79,7 +92,7 @@ else if ($action == "upload") {
         exit();
     }
 
-    // Check duplicate check name
+    // Duplicate check
     $stmt = $mysqli->prepare("SELECT * FROM checks WHERE userid = ? AND name = ?");
     $stmt->bind_param("is", $_SESSION['userid'], $name);
     $stmt->execute();
@@ -90,10 +103,9 @@ else if ($action == "upload") {
         exit();
     }
 
-    // Validate file upload
+    // File validation
     if (isset($_FILES['check_file']) && $_FILES['check_file']['error'] == 0) {
 
-        // 🔐 MIME type validation
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
         $mime = finfo_file($finfo, $_FILES['check_file']['tmp_name']);
 
@@ -104,25 +116,18 @@ else if ($action == "upload") {
             exit();
         }
 
-        // 🔐 Verify real image
         if (getimagesize($_FILES['check_file']['tmp_name']) === false) {
             echo "File is not a valid image";
             exit();
         }
 
-        // Get extension safely
         $ext = strtolower(pathinfo($_FILES['check_file']['name'], PATHINFO_EXTENSION));
-
-        // 🔐 Generate safe filename
         $filename = uniqid("check_", true) . "." . $ext;
 
-        // File path
         $full_path = dirname($_SERVER['SCRIPT_FILENAME']) . "/checks/" . $filename;
 
-        // Move file
         if (move_uploaded_file($_FILES['check_file']['tmp_name'], $full_path)) {
 
-            // Insert into database
             $stmt = $mysqli->prepare("INSERT INTO checks (userid, accountid, name, filename) VALUES (?, ?, ?, ?)");
             $stmt->bind_param("iiss", $_SESSION['userid'], $accountid, $name, $filename);
 
@@ -142,45 +147,93 @@ else if ($action == "upload") {
 
     $action = "check_view";
 }
-// ====================== LOGOUT ======================
+
+/* ====================== LOGOUT ====================== */
 if ($action == "logout") {
     $_SESSION['logged_in'] = false;
     session_destroy();
     echo "You have been logged out";
 }
 
-// ====================== VIEW ACCOUNTS ======================
+/* ====================== VIEW ACCOUNTS ====================== */
 elseif ($action == "view") {
 
-    $stmt = $mysqli->prepare("SELECT accounts.accountid, accounts.accountname, COUNT(checks.checkid) AS total_checks FROM accounts
-LEFT JOIN checks ON accounts.accountid = checks.accountid WHERE accounts.userid = ? GROUP BY accounts.accountid");
-    $stmt->bind_param("i", $_SESSION['userid']);
+    if ($_SESSION['role'] === 'admin') {
+
+        $stmt = $mysqli->prepare("
+            SELECT accounts.accountid, accounts.accountname, accounts.userid, 
+                   COUNT(checks.checkid) AS total_checks 
+            FROM accounts 
+            LEFT JOIN checks ON accounts.accountid = checks.accountid 
+            GROUP BY accounts.accountid
+        ");
+
+    } else {
+
+        $stmt = $mysqli->prepare("
+            SELECT accounts.accountid, accounts.accountname, 
+                   COUNT(checks.checkid) AS total_checks 
+            FROM accounts 
+            LEFT JOIN checks ON accounts.accountid = checks.accountid 
+            WHERE accounts.userid = ? 
+            GROUP BY accounts.accountid
+        ");
+
+        $stmt->bind_param("i", $_SESSION['userid']);
+    }
+
     $stmt->execute();
     $result = $stmt->get_result();
 
     echo "<h3>Accounts</h3>\n<table class='table'>\n<tr><th>Account Name</th><th>Checks</th></tr>";
 
     if ($result->num_rows > 0) {
-        while($row = $result->fetch_assoc()){
-            echo "<tr><td>" . htmlspecialchars($row['accountname']) . "</td><td>" . $row['total_checks'] . "</td></tr>";
+        while ($row = $result->fetch_assoc()) {
+
+            if ($_SESSION['role'] === 'admin') {
+                echo "<tr><td>" . htmlspecialchars($row['accountname']) .  
+                    "</td><td>" . $row['total_checks'] . "</td></tr>";
+            } else {
+                echo "<tr><td>" . htmlspecialchars($row['accountname']) . 
+                     "</td><td>" . $row['total_checks'] . "</td></tr>";
+            }
         }
     } else {
-        echo "<tr><td>You have no accounts</td><td>-</td></tr>";
+        echo "<tr><td>No accounts</td><td>-</td></tr>";
     }
+
     echo "</table>";
 
-    echo "<br><form method='post' action='account.php'>
+    // Form
+    echo "<br><form method='post' action='account.php'>";
+
+    if ($_SESSION['role'] === 'admin') {
+        $users = $mysqli->query("SELECT userid, username FROM users");
+
+        echo "<select name='userid'>";
+        while ($u = $users->fetch_assoc()) {
+            echo "<option value='{$u['userid']}'>" . htmlspecialchars($u['username']) . "</option>";
+        }
+        echo "</select><br>";
+    }
+
+    echo "
     <input type='text' name='name' />
     <input type='hidden' name='action' value='add_account'/>
     <button type='submit'>Add Account</button>
     </form>";
 }
 
-// ====================== CHECK UPLOAD FORM ======================
+/* ====================== CHECK UPLOAD FORM ====================== */
 elseif ($action == "check_upload") {
-    $stmt = $mysqli->prepare("SELECT * FROM accounts WHERE userid = ?");
 
-    $stmt->bind_param("i", $_SESSION['userid']);
+    if ($_SESSION['role'] === 'admin') {
+        $stmt = $mysqli->prepare("SELECT * FROM accounts");
+    } else {
+        $stmt = $mysqli->prepare("SELECT * FROM accounts WHERE userid = ?");
+        $stmt->bind_param("i", $_SESSION['userid']);
+    }
+
     $stmt->execute();
     $accounts = $stmt->get_result();
 
@@ -190,30 +243,35 @@ elseif ($action == "check_upload") {
     <select name='accountid'>";
 
     while ($row = $accounts->fetch_assoc()) {
-    echo "<option value='" . $row['accountid'] . "'>" . htmlspecialchars($row['accountname']) . "</option>";
-}
+        echo "<option value='" . $row['accountid'] . "'>" . htmlspecialchars($row['accountname']) . "</option>";
+    }
 
     echo "</select>
-
     <input type='file' name='check_file' />
     <input type='hidden' name='action' value='upload'/>
     <button type='submit'>Upload Check</button>
     </form>";
 }
 
-// ====================== VIEW CHECKS ======================
+/* ====================== VIEW CHECKS ====================== */
 elseif ($action == "check_view") {
 
-    $stmt = $mysqli->prepare("SELECT * FROM checks WHERE userid = ?");
-    $stmt->bind_param("i", $_SESSION['userid']);
+    if ($_SESSION['role'] === 'admin') {
+        $stmt = $mysqli->prepare("SELECT * FROM checks");
+    } else {
+        $stmt = $mysqli->prepare("SELECT * FROM checks WHERE userid = ?");
+        $stmt->bind_param("i", $_SESSION['userid']);
+    }
+
     $stmt->execute();
     $result = $stmt->get_result();
 
     echo "<h3>Checks</h3>\n<table class='table'>\n<tr><th>Name</th><th>View</th></tr>";
 
     if ($result->num_rows > 0) {
-        while($row = $result->fetch_assoc()){
-            echo "<tr><td>" . htmlspecialchars($row['name']) . "</td><td><a href='checks/" . $row['filename'] . "'>View</a></td></tr>";
+        while ($row = $result->fetch_assoc()) {
+            echo "<tr><td>" . htmlspecialchars($row['name']) . 
+                 "</td><td><a href='checks/" . $row['filename'] . "'>View</a></td></tr>";
         }
     } else {
         echo "<tr><td>No checks</td><td>-</td></tr>";

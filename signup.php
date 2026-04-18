@@ -40,6 +40,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             if ($stmt->execute()) {
                 $OKAY = TRUE;
+		// ✅ Get new user ID
+    		$new_user_id = $stmt->insert_id;
+
+    // ✅ Create default account
+    		$defaultAccount = $fullname. " Account";
+
+    		$stmt2 = $mysqli->prepare("INSERT INTO accounts (userid, accountname) VALUES (?, ?)");
+    		$stmt2->bind_param("is", $new_user_id, $defaultAccount);
+    		$stmt2->execute();
             } else {
                 $ERROR = "Insert failed";
             }
